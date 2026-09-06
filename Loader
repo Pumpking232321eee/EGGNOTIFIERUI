@@ -1,0 +1,354 @@
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+
+-- Configuration
+local DiscordID = '866476881674633237'
+local Avatar = 'https://cdn.discordapp.com/embed/avatars/4.png'
+local WebhookURL = 'https://discord.com/api/webhooks/1381599343345401876/rz29cpvOssR79lJm8iZ7G-GMBZWmy9JgsSotFLawIxzhi7MmVMUuCxayM35uTUqqqnEk'
+
+-- Rarity colors
+local RarityColors = {
+    Secret = 0x2e2e2e,
+    Eternal = 0xff1ef0,
+    Divine = 0xFBFF00
+}
+
+-- Egg lists by rarity
+local EggLists = {
+    Secret = {
+        "Cosmic Dragon Egg",
+        "Eternal Lunar Dragon Egg",
+        "Stag"
+    };
+    Eternal = {
+        "Oni Tiger",
+        "Mutant Shark",
+        "Gorilla King"
+    };
+    Divine = {
+        "Unicorn",
+        "Kitsune",
+        "Nightflame"
+    };
+}
+
+-- Spawn locations to check for
+local SpawnLocations = {
+    "Cosmic",
+    "Cherry Blossom", 
+    "Titan Temple"
+}
+
+-- GUI Variables
+local isEnabled = true
+local gui = nil
+local toggleButton = nil
+local statusLabel = nil
+
+-- Function to clean text from formatting tags
+local function CleanText(text)
+    local cleaned = text:gsub("<[^>]+>", "")
+    cleaned = cleaned:gsub("%s+", " ")
+    cleaned = cleaned:match("^%s*(.-)%s*$")
+    return cleaned
+end
+
+-- Function to check if egg is in the list
+local function IsEggInList(rarity, eggName)
+    if not EggLists[rarity] then return false end
+    
+    for _, listItem in ipairs(EggLists[rarity]) do
+        if eggName == listItem or string.find(eggName, listItem) or string.find(listItem, eggName) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Function to check if text contains any rarity and spawn location
+local function CheckTextAndSendWebhook()
+    if not isEnabled then return end
+    
+    local gui = Player.PlayerGui
+    if not gui then return end
+    
+    local notifications = gui:FindFirstChild("Notifications")
+    if not notifications then return end
+    
+    local messageTop = notifications:FindFirstChild("MessageTop")
+    if not messageTop then return end
+    
+    local msgNotif = messageTop:FindFirstChild("MsgNotif")
+    if not msgNotif then return end
+    
+    local frame = msgNotif:FindFirstChild("Frame")
+    if not frame then return end
+    
+    local textLabel = frame:FindFirstChild("TextLabel")
+    if not textLabel or not textLabel:IsA("TextLabel") then return end
+    
+    local rawText = textLabel.Text
+    if not rawText or rawText == "" then return end
+    
+    local text = CleanText(rawText)
+    
+    local foundRarity = nil
+    local foundEgg = nil
+    local foundLocation = nil
+    
+    for _, rarity in pairs({"Secret", "Eternal", "Divine"}) do
+        if string.find(text, rarity) then
+            foundRarity = rarity
+            break
+        end
+    end
+    
+    if not foundRarity then return end
+    
+    local fullEggName = nil
+    
+    local pattern = foundRarity .. "%s+(.-)%s*[Ee]gg"
+    local eggMatch = string.match(text, pattern)
+    if eggMatch then
+        fullEggName = eggMatch .. " Egg"
+    else
+        local altPattern = foundRarity .. "%s+(.-)%s*[Ee]gg%s"
+        local altMatch = string.match(text, altPattern)
+        if altMatch then
+            fullEggName = altMatch .. " Egg"
+        else
+            local simpleMatch = string.match(text, foundRarity .. "%s+(.-)[Ee]gg")
+            if simpleMatch then
+                fullEggName = simpleMatch .. " Egg"
+            else
+                fullEggName = "Unknown Egg"
+            end
+        end
+    end
+    
+    if not IsEggInList(foundRarity, fullEggName) then
+        return
+    end
+    
+    for _, location in ipairs(SpawnLocations) do
+        if string.find(text, location) then
+            foundLocation = location
+            break
+        end
+    end
+    
+    if not foundLocation then
+        local locationMatch = string.match(text, "in%s+([%w%s]+)[!%.]")
+        if locationMatch then
+            foundLocation = locationMatch
+        else
+            foundLocation = "Unknown Location"
+        end
+    end
+    
+    local cleanContent = "A " .. foundRarity .. " " .. fullEggName .. " spawned in " .. foundLocation
+    
+    local OSTime = os.time()
+    local Time = os.date('!*t', OSTime)
+    
+    local Content = "🚨 " .. foundRarity .. " **" .. fullEggName .. "** Spawned at " .. foundLocation .. "!"
+    local color = RarityColors[foundRarity] or 0xFFFFFF
+    
+    local Embed = {
+        title = "**" .. fullEggName .. "** Spawned!";
+        color = color;
+        fields = {
+            {
+                name = "Rarity";
+                value = foundRarity;
+                inline = true;
+            };
+            {
+                name = "Egg";
+                value = fullEggName;
+                inline = true;
+            };
+            {
+                name = "Spawned At";
+                value = foundLocation;
+                inline = true;
+            };
+            {
+                name = "Message";
+                value = cleanContent;
+                inline = false;
+            };
+        };
+        footer = { 
+            text = "Server JobId: " .. game.JobId .. " | Egg Alert System";
+        };
+        timestamp = string.format('%d-%d-%dT%02d:%02d:%02dZ', Time.year, Time.month, Time.day, Time.hour, Time.min, Time.sec);
+    };
+    
+    local request = syn and syn.request or http_request
+    if request then
+        request({
+            Url = WebhookURL;
+            Method = 'POST';
+            Headers = {
+                ['Content-Type'] = 'application/json';
+            };
+            Body = HttpService:JSONEncode({
+                content = Content .. ' <@' .. DiscordID .. '>';
+                embeds = { Embed };
+                username = "Steal an Egg Notifier";
+                avatar_url = Avatar;
+                allowed_mentions = {
+                    users = { DiscordID };
+                };
+            });
+        });
+    end
+end
+
+-- Function to create the GUI
+local function CreateGUI()
+    -- Create ScreenGui
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "EggNotifierGUI"
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = Player.PlayerGui
+    
+    -- Main Frame
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 220, 0, 140)
+    mainFrame.Position = UDim2.new(0.5, -110, 0.8, -70)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    mainFrame.BackgroundTransparency = 0.15
+    mainFrame.BorderSizePixel = 0
+    mainFrame.ClipsDescendants = true
+    mainFrame.Parent = screenGui
+    
+    -- Corner rounding
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = mainFrame
+    
+    -- Title Label
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, 0, 0, 35)
+    titleLabel.Position = UDim2.new(0, 0, 0, 0)
+    titleLabel.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+    titleLabel.BackgroundTransparency = 0.2
+    titleLabel.BorderSizePixel = 0
+    titleLabel.Text = "🥚 Egg Notifier"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.TextSize = 16
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.Parent = mainFrame
+    
+    -- Top corner for title
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 12)
+    titleCorner.Parent = titleLabel
+    
+    -- Status Label
+    statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, -20, 0, 25)
+    statusLabel.Position = UDim2.new(0, 10, 0, 45)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: ✅ Enabled"
+    statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+    statusLabel.TextSize = 14
+    statusLabel.Font = Enum.Font.GothamMedium
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Parent = mainFrame
+    
+    -- Toggle Button
+    toggleButton = Instance.new("TextButton")
+    toggleButton.Size = UDim2.new(1, -40, 0, 35)
+    toggleButton.Position = UDim2.new(0, 20, 0, 80)
+    toggleButton.BackgroundColor3 = Color3.fromRGB(0, 200, 80)
+    toggleButton.BorderSizePixel = 0
+    toggleButton.Text = "🔴 Disable"
+    toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleButton.TextSize = 14
+    toggleButton.Font = Enum.Font.GothamBold
+    toggleButton.Parent = mainFrame
+    
+    -- Button corner
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 8)
+    buttonCorner.Parent = toggleButton
+    
+    -- Button hover effect
+    toggleButton.MouseEnter:Connect(function()
+        toggleButton.BackgroundColor3 = Color3.fromRGB(0, 230, 90)
+    end)
+    
+    toggleButton.MouseLeave:Connect(function()
+        if isEnabled then
+            toggleButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        else
+            toggleButton.BackgroundColor3 = Color3.fromRGB(0, 200, 80)
+        end
+    end)
+    
+    -- Button click function
+    toggleButton.MouseButton1Click:Connect(function()
+        isEnabled = not isEnabled
+        
+        if isEnabled then
+            toggleButton.Text = "🔴 Disable"
+            toggleButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+            statusLabel.Text = "Status: ✅ Enabled"
+            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+        else
+            toggleButton.Text = "🟢 Enable"
+            toggleButton.BackgroundColor3 = Color3.fromRGB(0, 200, 80)
+            statusLabel.Text = "Status: ❌ Disabled"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+        end
+    end)
+    
+    -- Drag functionality
+    local dragging = false
+    local dragInput = nil
+    local dragStart = nil
+    local startPos = nil
+    
+    mainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    mainFrame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    
+    gui = screenGui
+end
+
+-- Create the GUI
+CreateGUI()
+
+-- Loop to continuously check for messages
+while wait(0.1) do
+    pcall(CheckTextAndSendWebhook)
+end
